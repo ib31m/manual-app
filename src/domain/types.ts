@@ -44,6 +44,10 @@ export interface EventTypeDef {
   hasPosition?: boolean;
   /** Whether the event records weather. */
   hasWeather?: boolean;
+  /** Whether sailed distance / steaming time can be reported. */
+  hasDistance?: boolean;
+  /** Whether machinery running hours can be reported. */
+  hasMachinery?: boolean;
   /** Short helper text taken from the manual. */
   description: string;
 }
@@ -79,6 +83,26 @@ export interface ConsumptionLine {
   usedFor?: string; // consumption breakdown (manual §3.8)
 }
 
+/** Machinery operations / running hours since last event (manual §3.3, §3.11). */
+export interface MachineryHours {
+  meHours?: number; // main engine
+  aeHours?: number; // aux engines (combined)
+  boilerHours?: number;
+  opsHours?: number; // onshore power supply (manual §3.11)
+  scrubberHours?: number; // §3.10
+}
+
+/** Instantaneous engine/propulsion data for the Performance Snapshot (§3.7). */
+export interface PerformanceData {
+  meRpm?: number;
+  mePowerKw?: number; // M/E shaft power
+  propPowerKw?: number; // propulsion power (per train, simplified to one)
+  meSfocGkwh?: number; // specific fuel oil consumption
+  scavAirPressBar?: number;
+  aeLoadKw?: number;
+  seaTempC?: number; // for ISO correction
+}
+
 export interface Weather {
   windForceBft?: number; // Beaufort
   windDir?: string;
@@ -106,7 +130,15 @@ export interface VesselEvent {
   position?: Position;
   sogKn?: number; // speed over ground
   stwKn?: number; // speed through water
+  distanceNm?: number; // sailed (observed) distance since last event
+  engineDistanceNm?: number; // engine distance (for slip)
+  steamingHours?: number; // steaming time since last event
+  avgRpm?: number;
   weather?: Weather;
+  /** Machinery running hours since last event. */
+  machinery?: MachineryHours;
+  /** Instantaneous engine data (Performance Snapshot only). */
+  performance?: PerformanceData;
   /** Consumptions are intentionally not reported in this event (manual §3.3). */
   consumptionsSkipped?: boolean;
   consumptions: ConsumptionLine[];
@@ -208,6 +240,28 @@ export interface ArchivedReport {
   summary: string;
 }
 
+/** Port log auto-generated from an Arrival / End-shifting event (manual §3.5). */
+export interface PortFact {
+  id: string;
+  label: string; // e.g. "Notice of Readiness tendered", "Cargo tank survey"
+  timeUtc: string;
+}
+export interface PortDelay {
+  id: string;
+  reason: string;
+  fromUtc: string;
+  toUtc: string;
+  remarks?: string;
+}
+export interface PortLogEntry {
+  id: string;
+  eventId: string; // the arrival / end-shifting event that opened the port log
+  port: string;
+  facts: PortFact[];
+  delays: PortDelay[];
+  remarks: string;
+}
+
 export interface VesselConfig {
   vesselName: string;
   imo: string;
@@ -240,6 +294,7 @@ export interface OnboardDB {
   agents: Agent[];
   schedule: ScheduleEntry[];
   garbage: GarbageEntry[];
+  portLogs: PortLogEntry[];
   archive: ArchivedReport[];
   lastBackup?: string;
 }

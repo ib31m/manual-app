@@ -86,6 +86,20 @@ export function commitEvent(db: OnboardDB, event: VesselEvent) {
 
   if (idx >= 0) db.events[idx] = next;
   else db.events.push(next);
+
+  // A port log opens automatically on Arrival / End-shifting (manual §3.5).
+  if ((next.typeId === 'arrival' || next.typeId === 'end_shifting') && next.status !== 'draft') {
+    if (!db.portLogs.some((p) => p.eventId === next.id)) {
+      db.portLogs.push({
+        id: uid('pl'),
+        eventId: next.id,
+        port: String(next.fields['port'] ?? ''),
+        facts: [],
+        delays: [],
+        remarks: '',
+      });
+    }
+  }
 }
 
 /** Reverse an event's effect and remove it (delete). Mutates `db`. */

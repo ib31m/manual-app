@@ -83,17 +83,19 @@ browser's `localStorage` for the site.
 
 ### Reporting app — *s-Insight | Log Recorder*
 - ✅ **Configuration import** by IMO; **Initialization wizard**
-- ✅ Navigation: Overview, Voyages, Schedule, Agents, Events, Officers, Cargo\*, Reports, Communication, Settings (\* cargo ship types only)
-- ✅ **Events**: full event catalogue (Voyage / Special / Operational, §5), **sequence-aware** picker with "Show more…", time + **LT/UTC** entry, position, weather (with the Performance-Snapshot "current weather" exception), **consumptions** with **Check ROB**, **drafts**, edit/delete, **Value-check** column
-- ✅ **Validation engine** with manual's three severities — **red (error, blocks send) / blue (warning) / green (info)** — covering required fields, negative ROB, fuel-without-spec, deviation reasons, off-hire fields, fuel-sludge ≤ 2 %, consumption-rate sanity, voyage/port consistency
+- ✅ Navigation grouped Bridge / Reporting / Output: Overview, Voyages, Schedule, Agents, Events, Port logs\*, Cargo\*, Officers, Reports, Communication, Settings (\* cargo ship types only)
+- ✅ **Events**: full event catalogue (Voyage / Special / Operational, §5), **sequence-aware** picker with "Show more…", time + **LT/UTC** entry, position, **distance run / engine distance / steaming hours / RPM (with live slip %)**, weather (with the Performance-Snapshot "current weather" exception), **consumptions with "Used for" breakdown** (§3.8), **machinery running hours** (ME/AE/Boiler/OPS), **Check ROB** + **Information panel** (ROB by sulphur category & fuel group), full **Performance Snapshot engine data** (§3.7), **drafts**, edit/delete, **Value-check** column, off-hire flagging
+- ✅ **Validation engine** with manual's three severities — **🔴 red (error, blocks send) / 🔵 blue (review) / 🟢 green (info)** — covering required fields, negative ROB, fuel-without-spec, deviation reasons, off-hire fields, fuel-sludge ≤ 2 %, consumption-rate sanity, **machinery hours vs duration**, **distance vs speed×time & slip**, **speed-order over-consumption**, **off-hire flagging**, voyage/port consistency
 - ✅ **Fuel ledger**: fossil + biofuel + blend catalogue, sulphur categories (HS/VLS/ULS), **bunkering** creates fuel parcels, **sounding correction**, transactional ROB on create/edit/delete
 - ✅ **Voyages**: Round / One-way / Idle, stages (BALLAST/LADEN, E/W/S/N), **speed orders**; delete only the latest unsent voyage
 - ✅ **Cargo**: Bills of Lading with density, status, total mass onboard
+- ✅ **Port logs** (§3.5): opened automatically on Arrival / End-shifting; port facts (NOR, surveys), delays + reasons, remarks; CSV export
 - ✅ **Officers**: Master / Chief Engineer with auto "In charge" by sign-on date
 - ✅ **Schedule & Agents**: port calls (ETA/ETD), agents with roles & serviced ports; CSV export
-- ✅ **Garbage Record Book** (MARPOL Annex V Part I/II) derived from disposal events; **Log Abstract**; Excel/CSV export
-- ✅ **Communication / Outbox**: error-gated **Send all**, **Archive** with report IDs + **re-send**
-- ✅ **Settings**: data-export config, default noon time, allow-deletion (verbal confirm), **backup/restore**, config import/upgrade
+- ✅ **Reports**: **Voyage Summary** (distance, days, avg speed, consumption by fuel & sulphur category, CO₂ estimate, cargo, bunkers ROB), **Garbage Record Book** (MARPOL Annex V Part I/II), **Log Abstract** (position, speed, distance, running hours, SFOC, consumption) — all Excel/CSV export
+- ✅ **Communication / Outbox**: KPI summary, error-gated **Send all**, expandable per-event check detail, **Archive** with report IDs + **re-send**
+- ✅ **Settings**: data-export config, default noon time (prefills noon events), allow-deletion (verbal confirm), **backup/restore**, config import/upgrade
+- ✅ **Enterprise UI**: grouped navigation, KPI strip, voyage-progress track, professional data tables (sticky headers, zebra, status chips), and consistent red/blue/green validation styling
 
 See **[`SPECIFICATION.md`](./SPECIFICATION.md)** §"Assumptions" and §"Out of
 scope" for what is simulated (shore server, e-mail, native installer) and what

@@ -381,6 +381,19 @@ export const EVENT_TYPES: EventTypeDef[] = [
   },
 ];
 
+// Derive machinery/distance capability from the manual (§3.3, §4.1, §6).
+// Machinery running hours go with any event that records consumptions.
+// Sailed distance/steaming time applies to passage-type events.
+const DISTANCE_EVENT_IDS = new Set([
+  'departure', 'bosp', 'eosp', 'begin_canal', 'end_canal',
+  'noon_sea', 'noon_river', 'arrival', 'begin_anchor',
+  'begin_shifting', 'end_shifting',
+]);
+for (const e of EVENT_TYPES) {
+  if (e.hasConsumptions) e.hasMachinery = true;
+  if (DISTANCE_EVENT_IDS.has(e.id)) e.hasDistance = true;
+}
+
 const BY_ID = new Map(EVENT_TYPES.map((e) => [e.id, e]));
 
 export function eventTypeById(id: string): EventTypeDef | undefined {

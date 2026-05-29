@@ -9,9 +9,20 @@ import type { ConsumptionLine, VesselEvent } from '../domain/types';
 import { uid, num } from '../lib/util';
 import { Confirm } from '../components/common/Modal';
 import { NumberField, SelectField, TextField, TextArea, CheckboxField } from '../components/common/Fields';
+import { FuelInfoPanel } from '../components/common/FuelInfoPanel';
+import { SEVERITY_ICON } from '../components/common/Status';
 
 const OFFSETS = Array.from({ length: 27 }, (_, i) => i - 12); // UTC-12 .. UTC+14
 const portOpts = PORTS.map((p) => ({ value: p.code, label: `${p.code} — ${p.name}` }));
+
+// Consumption-breakdown purposes (manual §3.8).
+const USED_FOR = ['', 'Propulsion', 'Maneuvering', 'Cargo heating', 'Discharging', 'Loading', 'Inerting', 'Tank cleaning', 'Exhaust gas cleaning', 'Boiler', 'Other'];
+
+function slipHint(dist?: number, eng?: number): string | undefined {
+  if (!dist || !eng || eng <= 0) return undefined;
+  const slip = ((eng - dist) / eng) * 100;
+  return `Slip ${slip.toFixed(1)}%`;
+}
 
 function toUtcIso(local: string, offsetHours: number): string {
   if (!local) return '';
@@ -48,16 +59,27 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
     const m = existing?.timeZoneLabel?.match(/UTC([+-]\d+)/);
     return m ? Number(m[1]) : 0;
   });
-  const [localTime, setLocalTime] = useState<string>(() =>
-    existing ? fromUtcIso(existing.timeUtc, existing.timeZoneLabel?.startsWith('UTC') ? 0 : offset) : fromUtcIso(new Date().toISOString(), 0),
-  );
+  const [localTime, setLocalTime] = useState<string>(() => {
+    if (existing) return fromUtcIso(existing.timeUtc, existing.timeZoneLabel?.startsWith('UTC') ? 0 : offset);
+    // Prefill noon reports with the configured default noon time (manual §5.1).
+    if (typeId.startsWith('noon')) {
+      return `${new Date().toISOString().slice(0, 10)}T${db!.settings.defaultNoonTime || '12:00'}`;
+    }
+    return fromUtcIso(new Date().toISOString(), 0);
+  });
 
   const [voyageId, setVoyageId] = useState(existing?.voyageId ?? db!.voyages[db!.voyages.length - 1]?.id ?? '');
   const [recipients, setRecipients] = useState(existing?.recipients ?? '');
   const [position, setPosition] = useState(existing?.position ?? {});
   const [sog, setSog] = useState<string>(existing?.sogKn?.toString() ?? '');
   const [stw, setStw] = useState<string>(existing?.stwKn?.toString() ?? '');
+  const [distanceNm, setDistanceNm] = useState<string>(existing?.distanceNm?.toString() ?? '');
+  const [engineDistanceNm, setEngineDistanceNm] = useState<string>(existing?.engineDistanceNm?.toString() ?? '');
+  const [steamingHours, setSteamingHours] = useState<string>(existing?.steamingHours?.toString() ?? '');
+  const [avgRpm, setAvgRpm] = useState<string>(existing?.avgRpm?.toString() ?? '');
   const [weather, setWeather] = useState(existing?.weather ?? {});
+  const [machinery, setMachinery] = useState(existing?.machinery ?? {});
+  const [performance, setPerformance] = useState(existing?.performance ?? {});
   const [consumptionsSkipped, setConsumptionsSkipped] = useState(existing?.consumptionsSkipped ?? false);
   const [consumptions, setConsumptions] = useState<ConsumptionLine[]>(existing?.consumptions ?? []);
   const [fields, setFields] = useState<Record<string, string | number | boolean>>(existing?.fields ?? {});
@@ -76,7 +98,13 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
       position: def.hasPosition ? position : undefined,
       sogKn: num(sog),
       stwKn: num(stw),
+      distanceNm: def.hasDistance ? num(distanceNm) : undefined,
+      engineDistanceNm: def.hasDistance ? num(engineDistanceNm) : undefined,
+      steamingHours: def.hasDistance ? num(steamingHours) : undefined,
+      avgRpm: def.hasDistance ? num(avgRpm) : undefined,
       weather: def.hasWeather ? weather : undefined,
+      machinery: def.hasMachinery && !consumptionsSkipped ? machinery : undefined,
+      performance: def.id === 'performance_snapshot' ? performance : undefined,
       consumptionsSkipped: def.hasConsumptions ? consumptionsSkipped : undefined,
       consumptions: def.hasConsumptions ? consumptions : [],
       fields,
@@ -86,7 +114,7 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
       sentAt: existing?.sentAt,
       reportId: existing?.reportId,
     }),
-    [existing, typeId, voyageId, timeUtc, tzLabel, def, position, sog, stw, weather, consumptionsSkipped, consumptions, fields, recipients],
+    [existing, typeId, voyageId, timeUtc, tzLabel, def, position, sog, stw, distanceNm, engineDistanceNm, steamingHours, avgRpm, weather, machinery, performance, consumptionsSkipped, consumptions, fields, recipients],
   );
 
   // Validate against the baseline that excludes this event's own saved effect.
@@ -228,12 +256,39 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
                     <NumberField label="Speed over ground" unit="kn" value={sog as unknown as number} onChange={setSog} />
                     <NumberField label="Speed through water" unit="kn" value={stw as unknown as number} onChange={setStw} />
                   </div>
+                  {def.hasDistance && (
+                    <div className="form-section">
+                      <h4>Distance &amp; engine</h4>
+                      <div className="grid grid-4">
+                        <NumberField label="Distance run" unit="nm" value={distanceNm as unknown as number} onChange={setDistanceNm} />
+                        <NumberField label="Engine distance" unit="nm" value={engineDistanceNm as unknown as number} onChange={setEngineDistanceNm} hint={slipHint(num(distanceNm), num(engineDistanceNm))} />
+                        <NumberField label="Steaming time" unit="h" value={steamingHours as unknown as number} onChange={setSteamingHours} />
+                        <NumberField label="Avg RPM" value={avgRpm as unknown as number} onChange={setAvgRpm} />
+                      </div>
+                    </div>
+                  )}
                   {def.id === 'performance_snapshot' && (
                     <div className="grid grid-2">
                       <NumberField label="Draught fwd" unit="m" value={fields['draught_fwd'] as number} onChange={(v) => setField('draught_fwd', num(v) ?? '')} />
                       <NumberField label="Draught aft" unit="m" value={fields['draught_aft'] as number} onChange={(v) => setField('draught_aft', num(v) ?? '')} />
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* --- Performance Snapshot engine data (§3.7) --- */}
+              {def.id === 'performance_snapshot' && (
+                <div className="card">
+                  <h3>Engine performance (instantaneous)</h3>
+                  <div className="hint" style={{ marginBottom: 10 }}>For hull &amp; propeller analysis only sailing conditions + weather are needed; engine data is optional.</div>
+                  <div className="grid grid-3">
+                    <NumberField label="M/E RPM" value={performance.meRpm} onChange={(v) => setPerformance((p) => ({ ...p, meRpm: num(v) }))} />
+                    <NumberField label="M/E power" unit="kW" value={performance.mePowerKw} onChange={(v) => setPerformance((p) => ({ ...p, mePowerKw: num(v) }))} />
+                    <NumberField label="Propulsion power" unit="kW" value={performance.propPowerKw} onChange={(v) => setPerformance((p) => ({ ...p, propPowerKw: num(v) }))} />
+                    <NumberField label="M/E SFOC" unit="g/kWh" value={performance.meSfocGkwh} onChange={(v) => setPerformance((p) => ({ ...p, meSfocGkwh: num(v) }))} />
+                    <NumberField label="Scav. air press." unit="bar" value={performance.scavAirPressBar} onChange={(v) => setPerformance((p) => ({ ...p, scavAirPressBar: num(v) }))} />
+                    <NumberField label="Seawater temp (ISO)" unit="°C" value={performance.seaTempC} onChange={(v) => setPerformance((p) => ({ ...p, seaTempC: num(v) }))} />
+                  </div>
                 </div>
               )}
 
@@ -273,15 +328,30 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
                     <>
                       {db!.fuels.length === 0 && <div className="empty">No fuels onboard. Add a Bunkering event first.</div>}
                       {consumptions.map((c) => (
-                        <div className="grid grid-3" key={c.id} style={{ alignItems: 'end' }}>
+                        <div className="grid grid-4" key={c.id} style={{ alignItems: 'end' }}>
                           <SelectField label="Fuel" value={c.fuelId} onChange={(v) => setCons(c.id, { fuelId: v })} options={db!.fuels.map((f) => ({ value: f.id, label: `${f.label} — ROB ${f.rob.toFixed(1)} mt` }))} />
                           <SelectField label="Consumer" value={c.consumer} onChange={(v) => setCons(c.id, { consumer: v as ConsumptionLine['consumer'] })} options={[{ value: 'ME', label: 'Main engine' }, { value: 'AE', label: 'Aux engine' }, { value: 'Boiler', label: 'Boiler' }, { value: 'Other', label: 'Other' }]} />
+                          <SelectField label="Used for" value={c.usedFor ?? ''} onChange={(v) => setCons(c.id, { usedFor: v })} options={USED_FOR.filter(Boolean).map((u) => ({ value: u, label: u }))} placeholder="—" />
                           <div className="row" style={{ alignItems: 'end', gap: 6 }}>
                             <NumberField label="Amount" unit="mt" value={c.amount} onChange={(v) => setCons(c.id, { amount: num(v) ?? 0 })} />
                             {!readOnly && <button className="btn-ghost btn-sm" style={{ marginBottom: 14 }} onClick={() => setConsumptions((arr) => arr.filter((x) => x.id !== c.id))}>✕</button>}
                           </div>
                         </div>
                       ))}
+
+                      {/* Machinery running hours (§3.3, §3.11) */}
+                      {def.hasMachinery && (
+                        <div className="form-section">
+                          <h4>Machinery running hours</h4>
+                          <div className="grid grid-4">
+                            <NumberField label="M/E" unit="h" value={machinery.meHours} onChange={(v) => setMachinery((m) => ({ ...m, meHours: num(v) }))} />
+                            <NumberField label="A/E (total)" unit="h" value={machinery.aeHours} onChange={(v) => setMachinery((m) => ({ ...m, aeHours: num(v) }))} />
+                            <NumberField label="Boiler" unit="h" value={machinery.boilerHours} onChange={(v) => setMachinery((m) => ({ ...m, boilerHours: num(v) }))} />
+                            <NumberField label="OPS / scrubber" unit="h" value={machinery.opsHours} onChange={(v) => setMachinery((m) => ({ ...m, opsHours: num(v) }))} />
+                          </div>
+                        </div>
+                      )}
+
                       {/* Check ROB */}
                       <div className="divider" />
                       <h4 style={{ color: 'var(--muted)' }}>Check ROB</h4>
@@ -305,28 +375,34 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
             </div>
 
             {/* --- Check results panel --- */}
-            <div className="checks">
+            <div className="checks stack">
               <div className="card">
                 <div className="card-head">
                   <h3>Check results</h3>
                   <div className="row" style={{ gap: 6 }}>
-                    {sum.errors > 0 && <span className="badge badge-err">{sum.errors}</span>}
-                    {sum.warnings > 0 && <span className="badge badge-warn">{sum.warnings}</span>}
-                    {sum.infos > 0 && <span className="badge badge-info">{sum.infos}</span>}
-                    {sum.errors === 0 && sum.warnings === 0 && <span className="badge badge-ok">Clear</span>}
+                    {sum.errors > 0 && <span className="chip chip-err"><span className="dot" />{sum.errors}</span>}
+                    {sum.warnings > 0 && <span className="chip chip-warn"><span className="dot" />{sum.warnings}</span>}
+                    {sum.errors === 0 && sum.warnings === 0 && <span className="chip chip-ok"><span className="dot" />Clear</span>}
                   </div>
                 </div>
-                <p className="text-muted" style={{ fontSize: '.8rem' }}>
-                  <span className="text-err">Red</span> = error (blocks sending) ·{' '}
-                  <span style={{ color: 'var(--warn)' }}>Blue</span> = review ·{' '}
-                  <span style={{ color: 'var(--info)' }}>Green</span> = info
-                </p>
+                <div className="sev-legend" style={{ marginBottom: 12 }}>
+                  <span>⛔ <b className="text-err">Red</b> error — blocks send</span>
+                  <span>ℹ️ <b style={{ color: 'var(--warn)' }}>Blue</b> review</span>
+                  <span>✓ <b style={{ color: 'var(--info)' }}>Green</b> info</span>
+                </div>
                 {results.length === 0 ? (
-                  <div className="badge badge-ok">No issues found.</div>
+                  <div className="chip chip-ok"><span className="dot" />No issues found.</div>
                 ) : (
                   results.map((r, i) => <CheckCard key={i} r={r} />)
                 )}
               </div>
+
+              {def.hasConsumptions && db!.fuels.length > 0 && (
+                <div className="card">
+                  <div className="card-head"><h3>Information — ROB</h3></div>
+                  <FuelInfoPanel fuels={db!.fuels} compact />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -362,8 +438,11 @@ export function EventEditor({ mode, typeId, eventId, onClose }: Props) {
 function CheckCard({ r }: { r: CheckResult }) {
   return (
     <div className={`check-item ${r.severity}`}>
-      <div className="field-name">{r.field}</div>
-      <div style={{ fontSize: '.86rem' }}>{r.message}</div>
+      <span className="sev-ico">{SEVERITY_ICON[r.severity]}</span>
+      <div>
+        <div className="field-name">{r.field}</div>
+        <div style={{ fontSize: '.86rem' }}>{r.message}</div>
+      </div>
     </div>
   );
 }

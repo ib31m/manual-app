@@ -36,6 +36,25 @@ html = renderToString(createElement(AppProvider, null, createElement(App)));
 assert.ok(html.includes('MV Nordic Voyager'), 'app shell should show vessel name');
 assert.ok(html.includes('Overview'), 'navigation should render');
 assert.ok(html.includes('Communication'), 'outbox nav should render');
-console.log('  ✓ activated + remembered + initialized boots into the app shell');
+assert.ok(html.includes('Voyage') && html.includes('Distance'), 'dashboard KPIs render');
+console.log('  ✓ activated + remembered + initialized boots into the app shell + dashboard');
+
+// 3) Render the heavy feature pages directly (catch runtime errors).
+const { OutboxPage } = await import('../src/pages/Outbox');
+const { ReportsPage } = await import('../src/pages/Reports');
+const { PortLogsPage } = await import('../src/pages/PortLogs');
+const { EventEditor } = await import('../src/pages/EventEditor');
+
+const wrap = (el: ReturnType<typeof createElement>) => renderToString(createElement(AppProvider, null, el));
+
+let h = wrap(createElement(OutboxPage));
+assert.ok(h.includes('Send all'), 'Outbox renders with Send all');
+h = wrap(createElement(ReportsPage));
+assert.ok(h.includes('Voyage Summary') && h.includes('Garbage Record Book'), 'Reports renders all tabs');
+h = wrap(createElement(PortLogsPage));
+assert.ok(h.includes('Port log'), 'Port logs page renders');
+h = wrap(createElement(EventEditor, { mode: 'new', typeId: 'noon_sea', onClose: () => {} }));
+assert.ok(h.includes('Check results') && h.includes('Information'), 'Event editor renders with check + info panels');
+console.log('  ✓ Outbox, Reports, Port logs and Event editor render without errors');
 
 console.log('\nReact render smoke checks passed ✅');

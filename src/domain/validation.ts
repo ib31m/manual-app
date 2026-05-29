@@ -11,7 +11,7 @@
 
 import type { OnboardDB, VesselEvent } from './types';
 import { eventTypeById, DISPOSAL_EVENT_IDS } from '../data/eventTypes';
-import { durationHours, previousEvent } from './sequence';
+import { durationHours, previousReportingEvent, offHireActive } from './sequence';
 
 export type Severity = 'error' | 'warning' | 'info';
 
@@ -123,8 +123,8 @@ export function validateEvent(db: OnboardDB, event: VesselEvent): CheckResult[] 
         }
       }
 
-      // Consumption-rate sanity vs. previous event (blue warning).
-      const prev = previousEvent(db.events, event.timeUtc, event.id);
+      // Consumption-rate sanity vs. the previous reporting event (blue warning).
+      const prev = previousReportingEvent(db.events, event.timeUtc, event.id);
       if (prev) {
         const hrs = durationHours(prev.timeUtc, event.timeUtc);
         const totalCons = event.consumptions.reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -140,6 +140,53 @@ export function validateEvent(db: OnboardDB, event: VesselEvent): CheckResult[] 
         }
         if (hrs < 0) {
           out.push({ severity: 'warning', field: 'time', message: 'This event is placed before an existing event — double-check surrounding events.' });
+        }
+
+        // Machinery running hours cannot exceed the time since the last event.
+        if (hrs > 0 && event.machinery) {
+          const limit = hrs * 1.05; // small tolerance
+          const checkHrs = (h: number | undefined, name: string) => {
+            if (h !== undefined && h > limit) {
+              out.push({ severity: 'warning', field: 'machinery', message: `${name} running hours (${h.toFixed(1)} h) exceed the ${hrs.toFixed(1)} h since the last event.` });
+            }
+          };
+          checkHrs(event.machinery.meHours, 'M/E');
+          checkHrs(event.machinery.boilerHours, 'Boiler');
+        }
+
+        // Distance vs speed×time sanity, and engine slip (manual §4.1).
+        if (def.hasDistance && hrs > 0) {
+          const dist = Number(event.distanceNm ?? NaN);
+          if (Number.isNaN(dist)) {
+            if (def.id === 'noon_sea' || def.id === 'eosp') {
+              out.push({ severity: 'warning', field: 'distance', message: 'Sailed distance should be reported on sea passage.' });
+            }
+          } else if (dist > 0 && event.sogKn) {
+            const expected = event.sogKn * hrs;
+            if (expected > 0 && Math.abs(dist - expected) / expected > 0.25) {
+              out.push({ severity: 'warning', field: 'distance', message: `Distance (${dist} nm) and SOG×time (${expected.toFixed(0)} nm) differ by >25% — please review.` });
+            }
+          }
+          if (event.engineDistanceNm && event.distanceNm) {
+            const slip = ((event.engineDistanceNm - event.distanceNm) / event.engineDistanceNm) * 100;
+            if (slip < -8 || slip > 25) {
+              out.push({ severity: 'warning', field: 'slip', message: `Propeller slip of ${slip.toFixed(1)}% is outside the usual range (−8% to 25%).` });
+            }
+          }
+        }
+
+        // Speed order over-consumption (manual §3.15.5).
+        const soId = String(event.fields['speed_order'] || '');
+        const voy = db.voyages.find((v) => v.id === event.voyageId);
+        const so = voy?.speedOrders.find((s) => s.id === soId);
+        if (so && hrs > 0 && totalCons > 0) {
+          const perDay = (totalCons / hrs) * 24;
+          if (so.maxConsumptionMtPerDay > 0 && perDay > so.maxConsumptionMtPerDay * 1.05) {
+            out.push({ severity: 'warning', field: 'speed_order', message: `Consumption ${perDay.toFixed(1)} mt/day exceeds the "${so.name}" warranty of ${so.maxConsumptionMtPerDay} mt/day.` });
+          }
+          if (event.sogKn !== undefined && event.sogKn < so.minSpeedKn) {
+            out.push({ severity: 'info', field: 'speed_order', message: `Speed ${event.sogKn} kn is below the "${so.name}" minimum of ${so.minSpeedKn} kn.` });
+          }
         }
       }
 
@@ -229,7 +276,20 @@ export function validateEvent(db: OnboardDB, event: VesselEvent): CheckResult[] 
     }
   }
 
+  // --- Off-hire flagging (manual §3.18): events during an off-hire period ---
+  if (def.id !== 'begin_offhire' && def.id !== 'end_offhire' && event.timeUtc) {
+    if (offHireActive(db.events, event.timeUtc, event.id)) {
+      out.push({ severity: 'info', field: 'off-hire', message: 'Vessel is in an off-hire period — this event is flagged until "End off-hire" is filed.' });
+    }
+  }
+
   return out;
+}
+
+/** True if the vessel is off-hire at the given event's time. */
+export function isFlaggedOffHire(db: OnboardDB, event: VesselEvent): boolean {
+  if (event.typeId === 'begin_offhire' || event.typeId === 'end_offhire') return false;
+  return offHireActive(db.events, event.timeUtc, event.id);
 }
 
 export interface CheckSummary {

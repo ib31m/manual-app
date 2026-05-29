@@ -5,7 +5,9 @@ import { checkPassword, rememberedPasswordExpired } from '../src/domain/auth';
 import { sulphurCategory } from '../src/data/fuels';
 import { validateEvent, isSendable, robAfterEvent } from '../src/domain/validation';
 import { commitEvent, removeEvent } from '../src/domain/fuelLedger';
-import { deriveVoyageState } from '../src/domain/sequence';
+import { deriveVoyageState, offHireActive } from '../src/domain/sequence';
+import { isFlaggedOffHire } from '../src/domain/validation';
+import { robBySulphur, robByGroup, fuelGroup } from '../src/domain/fuelInfo';
 import { seedDB } from '../src/data/seed';
 import { activateWithToken, verifyPuk, issuePuk } from '../src/server/mockServer';
 import type { OnboardDB, VesselEvent } from '../src/domain/types';
@@ -110,5 +112,59 @@ ok('deleting event reverses ROB effect (→ ' + robBefore + ')');
 const preview = robAfterEvent(db, { ...consume, consumptions: [{ id: 'c', fuelId: created.id, consumer: 'ME', amount: 50 }] });
 assert.strictEqual(preview.find((r) => r.fuelId === created.id)!.after, robBefore - 50);
 ok('Check ROB preview computes after-consumption ROB');
+
+// --- Fuel Information panel: ROB by sulphur category and group ---
+const info = robBySulphur(db.fuels);
+assert.ok(Math.abs(info.ULS + info.VLS + info.HS - info.total) < 0.01);
+assert.ok(robByGroup(db.fuels).length >= 1);
+assert.strictEqual(fuelGroup('RMG380'), 'LFO/HFO');
+assert.strictEqual(fuelGroup('DMA'), 'MDO/MGO');
+ok('Information panel groups ROB by sulphur category and fuel group');
+
+// --- Off-hire flagging (manual §3.18) ---
+const voyId = db.voyages[0].id;
+const mk = (typeId: string, timeUtc: string): VesselEvent => ({
+  id: 'oh_' + typeId + timeUtc, typeId, voyageId: voyId, timeUtc, timeZoneLabel: 'UTC',
+  consumptions: [], fields: {}, status: 'ready', createdAt: timeUtc,
+});
+const ohEvents = [mk('begin_offhire', '2026-07-01T00:00:00.000Z'), mk('noon_sea', '2026-07-01T06:00:00.000Z'), mk('end_offhire', '2026-07-02T00:00:00.000Z')];
+assert.strictEqual(offHireActive(ohEvents, '2026-07-01T06:00:00.000Z'), true);
+assert.strictEqual(offHireActive(ohEvents, '2026-07-02T01:00:00.000Z'), false);
+const dbOh: OnboardDB = { ...db, events: [...db.events, ...ohEvents] };
+assert.strictEqual(isFlaggedOffHire(dbOh, ohEvents[1]), true);
+ok('events during an off-hire period are flagged until End off-hire');
+
+// --- Port log auto-generated on Arrival (manual §3.5) ---
+const arr: VesselEvent = {
+  id: 'arr_test', typeId: 'arrival', voyageId: voyId, timeUtc: '2026-06-05T20:00:00.000Z', timeZoneLabel: 'UTC',
+  position: { lat: 1.26, lon: 103.8 }, consumptions: [{ id: 'c', fuelId: db.fuels[0].id, consumer: 'ME', amount: 1.2 }],
+  fields: { port: 'SGSIN' }, status: 'ready', createdAt: '2026-06-05T20:00:00.000Z',
+};
+commitEvent(db, arr);
+assert.ok(db.portLogs.some((p) => p.eventId === 'arr_test' && p.port === 'SGSIN'));
+ok('filing an Arrival opens a port log automatically');
+
+// --- Sea-passage sanity: speed-order over-consumption, distance & machinery warnings ---
+const db2: OnboardDB = seedDB(activateWithToken('OCEANLY-DEMO-2026').config!);
+const eco = db2.voyages[0].speedOrders[0];
+const vlsfoId = db2.fuels[0].id;
+const prevNoon: VesselEvent = {
+  id: 'p1', typeId: 'noon_sea', voyageId: db2.voyages[0].id, timeUtc: '2026-07-01T00:00:00.000Z', timeZoneLabel: 'UTC',
+  position: { lat: 40, lon: -10 }, sogKn: 12, distanceNm: 288, steamingHours: 24, weather: { windForceBft: 3 },
+  machinery: { meHours: 24 }, consumptions: [{ id: 'c', fuelId: vlsfoId, consumer: 'ME', amount: 24 }],
+  fields: { speed_order: eco.id }, status: 'ready', createdAt: '2026-07-01T00:00:00.000Z',
+};
+commitEvent(db2, prevNoon);
+const testNoon: VesselEvent = {
+  id: 'p2', typeId: 'noon_sea', voyageId: db2.voyages[0].id, timeUtc: '2026-07-02T00:00:00.000Z', timeZoneLabel: 'UTC',
+  position: { lat: 38, lon: -12 }, sogKn: 12, /* distanceNm intentionally missing */ steamingHours: 24, weather: { windForceBft: 3 },
+  machinery: { meHours: 40 }, consumptions: [{ id: 'c', fuelId: vlsfoId, consumer: 'ME', amount: 60 }],
+  fields: { speed_order: eco.id }, status: 'ready', createdAt: '2026-07-02T00:00:00.000Z',
+};
+const r2 = validateEvent(db2, testNoon);
+assert.ok(r2.some((r) => r.field === 'speed_order' && r.severity === 'warning'), 'expected speed-order over-consumption warning');
+assert.ok(r2.some((r) => r.field === 'distance' && r.severity === 'warning'), 'expected missing-distance warning');
+assert.ok(r2.some((r) => r.field === 'machinery' && r.severity === 'warning'), 'expected machinery-hours warning');
+ok('sea-passage checks: speed-order, distance and machinery-hours warnings fire');
 
 console.log(`\nAll ${passed} domain smoke checks passed ✅`);

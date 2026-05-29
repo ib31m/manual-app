@@ -4,11 +4,13 @@ import { CARGO_SHIP_TYPES } from '../domain/types';
 import { isSendable } from '../domain/validation';
 import { deriveVoyageState } from '../domain/sequence';
 import { SERVER_VERSION } from '../server/mockServer';
+import { StateChip } from '../components/common/Status';
 
 import { Dashboard } from './Dashboard';
 import { EventsPage } from './Events';
 import { VoyagesPage } from './Voyages';
 import { CargoPage } from './Cargo';
+import { PortLogsPage } from './PortLogs';
 import { OfficersPage } from './Officers';
 import { SchedulePage } from './Schedule';
 import { AgentsPage } from './Agents';
@@ -22,6 +24,7 @@ export type PageKey =
   | 'schedule'
   | 'agents'
   | 'events'
+  | 'portlogs'
   | 'officers'
   | 'cargo'
   | 'reports'
@@ -32,20 +35,22 @@ interface NavItem {
   key: PageKey;
   label: string;
   icon: string;
+  group: string;
   cargoOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
-  { key: 'dashboard', label: 'Overview', icon: '🧭' },
-  { key: 'voyages', label: 'Voyages', icon: '🗺️' },
-  { key: 'schedule', label: 'Schedule', icon: '📅' },
-  { key: 'agents', label: 'Agents', icon: '🏢' },
-  { key: 'events', label: 'Events', icon: '📝' },
-  { key: 'officers', label: 'Officers', icon: '👮' },
-  { key: 'cargo', label: 'Cargo', icon: '📦', cargoOnly: true },
-  { key: 'reports', label: 'Reports', icon: '📊' },
-  { key: 'outbox', label: 'Communication', icon: '📡' },
-  { key: 'settings', label: 'Settings', icon: '⚙️' },
+  { key: 'dashboard', label: 'Overview', icon: '🧭', group: 'Bridge' },
+  { key: 'voyages', label: 'Voyages', icon: '🗺️', group: 'Bridge' },
+  { key: 'schedule', label: 'Schedule', icon: '📅', group: 'Bridge' },
+  { key: 'agents', label: 'Agents', icon: '🏢', group: 'Bridge' },
+  { key: 'events', label: 'Events', icon: '📝', group: 'Reporting' },
+  { key: 'portlogs', label: 'Port logs', icon: '⚓', group: 'Reporting', cargoOnly: true },
+  { key: 'cargo', label: 'Cargo', icon: '📦', group: 'Reporting', cargoOnly: true },
+  { key: 'officers', label: 'Officers', icon: '👮', group: 'Reporting' },
+  { key: 'reports', label: 'Reports', icon: '📊', group: 'Output' },
+  { key: 'outbox', label: 'Communication', icon: '📡', group: 'Output' },
+  { key: 'settings', label: 'Settings', icon: '⚙️', group: 'Output' },
 ];
 
 const TITLES: Record<PageKey, string> = {
@@ -54,6 +59,7 @@ const TITLES: Record<PageKey, string> = {
   schedule: 'Schedule',
   agents: 'Agents',
   events: 'Events',
+  portlogs: 'Port logs',
   officers: 'Officers',
   cargo: 'Cargo',
   reports: 'Reports',
@@ -61,8 +67,10 @@ const TITLES: Record<PageKey, string> = {
   settings: 'Settings',
 };
 
+const GROUPS = ['Bridge', 'Reporting', 'Output'];
+
 export function AppShell() {
-  const { db, activation, logout } = useApp();
+  const { db, logout } = useApp();
   const [page, setPage] = useState<PageKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -78,60 +86,54 @@ export function AppShell() {
     setMenuOpen(false);
   }
 
+  const visible = (n: NavItem) => !n.cargoOnly || showCargo;
+
   return (
     <div className="shell">
       {menuOpen && <div className="backdrop" onClick={() => setMenuOpen(false)} />}
       <aside className={`sidebar${menuOpen ? ' open' : ''}`}>
         <div className="brand">
-          <div className="logo">⚓ s-Log Recorder</div>
+          <div className="logo"><span className="mark">⚓</span> s-Log Recorder</div>
           <div className="ship">
-            {db.config.vesselName}
-            <br />
+            <strong>{db.config.vesselName}</strong>
             IMO {db.config.imo} · {db.config.shipType}
+            <br />Call sign {db.config.callSign} · {db.config.flag}
           </div>
         </div>
         <nav className="nav">
-          {NAV.filter((n) => !n.cargoOnly || showCargo).map((n) => (
-            <button
-              key={n.key}
-              className={page === n.key ? 'active' : ''}
-              onClick={() => go(n.key)}
-            >
-              <span className="nav-icon">{n.icon}</span>
-              <span>{n.label}</span>
-              {n.key === 'outbox' && unsent.length > 0 && (
-                <span className={`count${blockedCount ? ' alert' : ''}`}>{unsent.length}</span>
-              )}
-            </button>
+          {GROUPS.map((grp) => (
+            <div key={grp}>
+              <div className="nav-group">{grp}</div>
+              {NAV.filter((n) => n.group === grp && visible(n)).map((n) => (
+                <button key={n.key} className={page === n.key ? 'active' : ''} onClick={() => go(n.key)}>
+                  <span className="nav-icon">{n.icon}</span>
+                  <span>{n.label}</span>
+                  {n.key === 'outbox' && unsent.length > 0 && (
+                    <span className={`count${blockedCount ? ' alert' : ''}`}>{unsent.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-foot">
           <div className="row spread">
-            <span className="badge badge-ok offline-tag">● Offline-ready</span>
-            <button className="btn-ghost btn-sm" style={{ color: '#cdd9e9' }} onClick={logout}>
-              Log out
-            </button>
+            <span className="chip chip-ok offline-tag"><span className="dot" />Offline-ready</span>
+            <button className="btn-ghost btn-sm" style={{ color: '#b7c6d8' }} onClick={logout}>Log out</button>
           </div>
-          <div style={{ marginTop: 8 }}>Config v{db.config.configVersion}</div>
+          <div style={{ marginTop: 8 }}>Recorder config v{db.config.configVersion}</div>
         </div>
       </aside>
 
       <div className="main">
         <header className="topbar">
-          <button className="btn-ghost menu-toggle" onClick={() => setMenuOpen(true)}>
-            ☰
-          </button>
+          <button className="btn-ghost menu-toggle" onClick={() => setMenuOpen(true)}>☰</button>
           <span className="title">{TITLES[page]}</span>
-          <span className="badge badge-state">{voyageState}</span>
+          <StateChip state={voyageState} />
           <div className="spacer" />
           {upgradeAvailable && (
-            <span className="badge badge-amber" title="A new version is available (Performance Lite §2.5)">
-              ⬆ Upgrade available
-            </span>
+            <span className="chip chip-amber" title="A new version is available (Performance Lite §2.5)">⬆ Upgrade available</span>
           )}
-          <span className="text-muted nowrap" style={{ fontSize: '.82rem' }}>
-            {activation?.config.flag}
-          </span>
         </header>
 
         <main className="content">
@@ -140,6 +142,7 @@ export function AppShell() {
           {page === 'schedule' && <SchedulePage />}
           {page === 'agents' && <AgentsPage />}
           {page === 'events' && <EventsPage />}
+          {page === 'portlogs' && showCargo && <PortLogsPage />}
           {page === 'officers' && <OfficersPage />}
           {page === 'cargo' && showCargo && <CargoPage />}
           {page === 'reports' && <ReportsPage />}

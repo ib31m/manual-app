@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../store/AppContext';
 import { EVENT_TYPES, eventTypeById, eventsInSequence } from '../data/eventTypes';
 import { deriveVoyageState } from '../domain/sequence';
-import { validateEvent, summarize } from '../domain/validation';
+import { validateEvent, summarize, isFlaggedOffHire } from '../domain/validation';
 import { baselineWithout } from '../domain/fuelLedger';
 import type { EventCategory, VesselEvent } from '../domain/types';
 import { fmtUtc } from '../lib/util';
 import { Modal } from '../components/common/Modal';
 import { EventEditor } from './EventEditor';
 import { portLabel } from '../data/ports';
+import { CheckChip, StatusChip, StateChip } from '../components/common/Status';
 
 interface EditorState {
   mode: 'new' | 'edit';
@@ -59,7 +60,7 @@ export function EventsPage() {
             </div>
             <div>
               <label style={{ marginBottom: 2 }}>Current voyage state</label>
-              <div><span className="badge badge-state">{state}</span></div>
+              <div><StateChip state={state} /></div>
             </div>
           </div>
           <div className="btn-row">
@@ -70,17 +71,17 @@ export function EventsPage() {
         </div>
 
         {events.length === 0 ? (
-          <div className="empty">
-            No events for this filter. Use the “+ … event” buttons to file an event.
-          </div>
+          <div className="empty"><span className="ico">📝</span>No events for this filter. Use the “+ … event” buttons to file an event.</div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Time</th>
+                  <th>Time (UTC)</th>
                   <th>Event</th>
                   <th>Voyage</th>
+                  <th className="num">Dist.</th>
+                  <th className="num">Cons.</th>
                   <th>Status</th>
                   <th>Value check</th>
                   <th></th>
@@ -145,38 +146,27 @@ function EventRow({ event, onEdit }: { event: VesselEvent; onEdit: () => void })
   // Validate against the baseline that excludes this event's own (saved) effect.
   const base = event.status === 'sent' ? db : baselineWithout(db, event.id);
   const sum = summarize(validateEvent(base, event));
+  const flagged = isFlaggedOffHire(db, event);
+  const cons = event.consumptionsSkipped ? 0 : event.consumptions.reduce((s, c) => s + (Number(c.amount) || 0), 0);
 
   return (
-    <tr className={`clickable${event.status === 'draft' ? ' draft' : ''}`} onClick={onEdit}>
+    <tr className={`clickable${event.status === 'draft' ? ' draft' : ''}${flagged ? ' flagged' : ''}`} onClick={onEdit}>
       <td className="nowrap">
         {fmtUtc(event.timeUtc)}
-        <div className="text-muted" style={{ fontSize: '.75rem' }}>{event.timeZoneLabel}</div>
+        <div className="text-muted" style={{ fontSize: '.74rem' }}>{event.timeZoneLabel}</div>
       </td>
       <td>
         {def?.name ?? event.typeId}
         {event.fields['port'] ? <div className="text-muted" style={{ fontSize: '.78rem' }}>{portLabel(String(event.fields['port']))}</div> : null}
+        {flagged && <span className="chip chip-amber" style={{ marginTop: 4 }}><span className="dot" />Off-hire</span>}
       </td>
       <td>{db.voyages.find((v) => v.id === event.voyageId)?.voyageNo ?? <span className="text-err">none</span>}</td>
-      <td>
-        {event.status === 'draft' && <span className="badge badge-amber">Draft</span>}
-        {event.status === 'ready' && <span className="badge badge-muted">Ready</span>}
-        {event.status === 'sent' && <span className="badge badge-ok">Sent {event.reportId ? `· ${event.reportId}` : ''}</span>}
-      </td>
-      <td>
-        {event.status === 'sent' ? (
-          <span className="dot dot-ok" />
-        ) : sum.errors > 0 ? (
-          <span className="badge badge-err">{sum.errors} error{sum.errors > 1 ? 's' : ''}</span>
-        ) : sum.warnings > 0 ? (
-          <span className="badge badge-warn">{sum.warnings} warning{sum.warnings > 1 ? 's' : ''}</span>
-        ) : (
-          <span className="badge badge-ok">OK</span>
-        )}
-      </td>
+      <td className="num">{event.distanceNm ? event.distanceNm : '—'}</td>
+      <td className="num">{cons > 0 ? cons.toFixed(1) : event.consumptionsSkipped ? 'skip' : '—'}</td>
+      <td><StatusChip status={event.status} /></td>
+      <td><CheckChip summary={sum} sent={event.status === 'sent'} /></td>
       <td onClick={(e) => e.stopPropagation()}>
-        <button className="btn-ghost btn-sm" onClick={onEdit}>
-          {event.status === 'sent' ? 'View' : 'Edit'}
-        </button>
+        <button className="btn-ghost btn-sm" onClick={onEdit}>{event.status === 'sent' ? 'View' : 'Edit'}</button>
       </td>
     </tr>
   );
